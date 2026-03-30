@@ -1,0 +1,10 @@
+.env
+.env.local
+.env.*.local
+.python-version
+.venv
+venv/
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+.DS_Store
