@@ -5,7 +5,6 @@ import streamlit as st
 # CONFIG
 # =============================
 API_BASE = "http://127.0.0.1:8000"
-#API_BASE = "http://localhost:8000"
 TMDB_IMG = "https://image.tmdb.org/t/p/w500"
 
 st.set_page_config(page_title="Movie Recommender", page_icon="🎬", layout="wide")
@@ -114,9 +113,12 @@ if "view" not in st.session_state:
     st.session_state.view = "home"  # home | details
 if "selected_tmdb_id" not in st.session_state:
     st.session_state.selected_tmdb_id = None
+if "selected_title" not in st.session_state:
+    st.session_state.selected_title = None
 
 qp_view = st.query_params.get("view")
 qp_id = st.query_params.get("id")
+qp_title = st.query_params.get("title")
 if qp_view in ("home", "details"):
     st.session_state.view = qp_view
 if qp_id:
@@ -125,21 +127,32 @@ if qp_id:
         st.session_state.view = "details"
     except:
         pass
+if qp_title:
+    st.session_state.selected_title = str(qp_title)
 
 
 def goto_home():
     st.session_state.view = "home"
+    st.session_state.selected_tmdb_id = None
+    st.session_state.selected_title = None
     st.query_params["view"] = "home"
     if "id" in st.query_params:
         del st.query_params["id"]
+    if "title" in st.query_params:
+        del st.query_params["title"]
     st.rerun()
 
 
-def goto_details(tmdb_id: int):
+def goto_details(tmdb_id: int, title: str | None = None):
     st.session_state.view = "details"
     st.session_state.selected_tmdb_id = int(tmdb_id)
+    st.session_state.selected_title = title
     st.query_params["view"] = "details"
     st.query_params["id"] = str(int(tmdb_id))
+    if title:
+        st.query_params["title"] = title
+    elif "title" in st.query_params:
+        del st.query_params["title"]
     st.rerun()
 
 
@@ -184,7 +197,7 @@ def poster_grid(cards, cols=6, key_prefix="grid"):
 
                 if st.button("Open", key=f"{key_prefix}_{r}_{c}_{idx}_{tmdb_id}"):
                     if tmdb_id:
-                        goto_details(tmdb_id)
+                        goto_details(tmdb_id, title)
 
                 st.markdown(
                     f"<div class='movie-title'>{title}</div>", unsafe_allow_html=True
@@ -271,7 +284,7 @@ def parse_tmdb_search_to_cards(data, keyword: str, limit: int = 24):
     for x in final_list[:10]:
         year = (x.get("release_date") or "")[:4]
         label = f"{x['title']} ({year})" if year else x["title"]
-        suggestions.append((label, x["tmdb_id"]))
+        suggestions.append((label, x["tmdb_id"], x["title"]))
 
     # Cards = top N
     cards = [
@@ -342,9 +355,11 @@ if st.session_state.view == "home":
                     selected = st.selectbox("Suggestions", labels, index=0)
 
                     if selected != "-- Select a movie --":
-                        # map label -> id
-                        label_to_id = {s[0]: s[1] for s in suggestions}
-                        goto_details(label_to_id[selected])
+                        label_to_movie = {
+                            s[0]: {"tmdb_id": s[1], "title": s[2]} for s in suggestions
+                        }
+                        movie = label_to_movie[selected]
+                        goto_details(movie["tmdb_id"], movie["title"])
                 else:
                     st.info("No suggestions found. Try another keyword.")
 
@@ -385,10 +400,16 @@ elif st.session_state.view == "details":
             goto_home()
 
     # Details (your FastAPI safe route)
-    data, err = api_get_json(f"/movie/id/{tmdb_id}")
+    details_params = None
+    if st.session_state.selected_title:
+        details_params = {"title": st.session_state.selected_title}
+
+    data, err = api_get_json(f"/movie/id/{tmdb_id}", params=details_params)
     if err or not data:
         st.error(f"Could not load details: {err or 'Unknown error'}")
         st.stop()
+
+    st.session_state.selected_title = data.get("title") or st.session_state.selected_title
 
     # Layout: Poster LEFT, Details RIGHT
     left, right = st.columns([1, 2.4], gap="large")
@@ -425,8 +446,8 @@ elif st.session_state.view == "details":
     st.markdown("### ✅ Recommendations")
 
     # Recommendations (TF-IDF + Genre) via your bundle endpoint
-    title = (data.get("title") or "").strip()
-    tmdb_id = data.get("id")
+    title = (data.get("title") or st.session_state.selected_title or "").strip()
+    tmdb_id = data.get("tmdb_id") or st.session_state.selected_tmdb_id
     if title:
         bundle, err2 = api_get_json(
             "/movie/search",
@@ -449,9 +470,11 @@ elif st.session_state.view == "details":
             )
         else:
             st.info("Showing Genre recommendations (fallback).")
-            genre_only, err3 = api_get_json(
-                "/recommend/genre", params={"tmdb_id": tmdb_id, "limit": 18}
-            )
+            genre_params = {"tmdb_id": tmdb_id, "limit": 18}
+            if title:
+                genre_params["title"] = title
+
+            genre_only, err3 = api_get_json("/recommend/genre", params=genre_params)
             if not err3 and genre_only:
                 poster_grid(
                     genre_only, cols=grid_cols, key_prefix="details_genre_fallback"

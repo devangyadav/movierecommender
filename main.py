@@ -674,12 +674,17 @@ async def tmdb_search(
 
 # ---------- MOVIE DETAILS (SAFE ROUTE) ----------
 @app.get("/movie/id/{tmdb_id}", response_model=TMDBMovieDetails)
-async def movie_details_route(tmdb_id: int):
+async def movie_details_route(
+    tmdb_id: int,
+    title: Optional[str] = Query(None),
+):
     try:
         return await tmdb_movie_details(tmdb_id)
     except HTTPException as e:
         if tmdb_error_fallback_ok(e):
             local_row = get_local_movie_row(tmdb_id)
+            if local_row is None and title:
+                local_row = local_find_best_movie(title)
             if local_row is not None:
                 return local_row_to_details(local_row)
         raise
@@ -690,6 +695,7 @@ async def movie_details_route(tmdb_id: int):
 async def recommend_genre(
     tmdb_id: int = Query(...),
     limit: int = Query(18, ge=1, le=50),
+    title: Optional[str] = Query(None),
 ):
     """
     Given a TMDB movie ID:
@@ -716,8 +722,11 @@ async def recommend_genre(
         return [c for c in cards if c.tmdb_id != tmdb_id]
     except HTTPException as e:
         if tmdb_error_fallback_ok(e):
+            source_row = get_local_movie_row(tmdb_id)
+            if source_row is None and title:
+                source_row = local_find_best_movie(title)
             return local_genre_recommendations(
-                source_row=get_local_movie_row(tmdb_id),
+                source_row=source_row,
                 limit=limit,
                 exclude_tmdb_id=tmdb_id,
             )
