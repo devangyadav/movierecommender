@@ -369,7 +369,6 @@ if st.session_state.view == "home":
 # VIEW: DETAILS
 # ==========================================================
 elif st.session_state.view == "details":
-
     tmdb_id = st.session_state.selected_tmdb_id
     if not tmdb_id:
         st.warning("No movie selected.")
@@ -385,13 +384,13 @@ elif st.session_state.view == "details":
         if st.button("← Back to Home"):
             goto_home()
 
-    # Fetch details
+    # Details (your FastAPI safe route)
     data, err = api_get_json(f"/movie/id/{tmdb_id}")
     if err or not data:
         st.error(f"Could not load details: {err or 'Unknown error'}")
         st.stop()
 
-    # Layout
+    # Layout: Poster LEFT, Details RIGHT
     left, right = st.columns([1, 2.4], gap="large")
 
     with left:
@@ -407,8 +406,12 @@ elif st.session_state.view == "details":
         st.markdown(f"## {data.get('title','')}")
         release = data.get("release_date") or "-"
         genres = ", ".join([g["name"] for g in data.get("genres", [])]) or "-"
-        st.markdown(f"<div class='small-muted'>Release: {release}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-muted'>Genres: {genres}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='small-muted'>Release: {release}</div>", unsafe_allow_html=True
+        )
+        st.markdown(
+            f"<div class='small-muted'>Genres: {genres}</div>", unsafe_allow_html=True
+        )
         st.markdown("---")
         st.markdown("### Overview")
         st.write(data.get("overview") or "No overview available.")
@@ -418,40 +421,12 @@ elif st.session_state.view == "details":
         st.markdown("#### Backdrop")
         st.image(data["backdrop_url"], use_column_width=True)
 
-    # =============================
-    # 💬 REVIEWS
-    # =============================
-    st.divider()
-    st.markdown("### 💬 User Reviews")
-
-    reviews, err = api_get_json(f"/movie/reviews/{tmdb_id}")
-
-    if err:
-        st.warning("⚠️ Unable to fetch reviews right now.")
-
-    elif reviews:
-        for r in reviews:
-            st.markdown(f"""
-            <div class="card">
-                <b>👤 {r['author']}</b><br>
-                ⭐ {r['rating'] if r['rating'] else 'N/A'}<br><br>
-                <div class="small-muted">
-                    {r['content'][:300]}...
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    else:
-        st.info("No reviews available.")
-
-    # =============================
-    # ✅ RECOMMENDATIONS
-    # =============================
     st.divider()
     st.markdown("### ✅ Recommendations")
 
+    # Recommendations (TF-IDF + Genre) via your bundle endpoint
     title = (data.get("title") or "").strip()
-
+    tmdb_id = data.get("id")
     if title:
         bundle, err2 = api_get_json(
             "/movie/search",
